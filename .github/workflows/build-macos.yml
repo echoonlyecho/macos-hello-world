@@ -73,23 +73,34 @@ jobs:
         brew install create-dmg
         
         VOLICON_PATH="dist/hello-world.app/Contents/Resources/AppIcon.icns"
-        VOLICON_ARGS=()
-        if [ -f "$VOLICON_PATH" ]; then
-          VOLICON_ARGS=(--volicon "$VOLICON_PATH")
-        fi
 
         # 创建 DMG（source folder 必须是包含 .app 的目录）
-        if ! create-dmg \
-          --volname "Hello World" \
-          "${VOLICON_ARGS[@]}" \
-          --window-pos 200 120 \
-          --window-size 800 400 \
-          --icon-size 100 \
-          --icon "hello-world.app" 200 190 \
-          --hide-extension "hello-world.app" \
-          --app-drop-link 600 185 \
-          "hello-world.dmg" \
-          "$GITHUB_WORKSPACE/dist"; then
+        if [ -f "$VOLICON_PATH" ]; then
+          create-dmg \
+            --volname "Hello World" \
+            --volicon "$VOLICON_PATH" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "hello-world.app" 200 190 \
+            --hide-extension "hello-world.app" \
+            --app-drop-link 600 185 \
+            "hello-world.dmg" \
+            "$GITHUB_WORKSPACE/dist" || true
+        else
+          create-dmg \
+            --volname "Hello World" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "hello-world.app" 200 190 \
+            --hide-extension "hello-world.app" \
+            --app-drop-link 600 185 \
+            "hello-world.dmg" \
+            "$GITHUB_WORKSPACE/dist" || true
+        fi
+
+        if [ ! -f "hello-world.dmg" ]; then
           echo "create-dmg failed, falling back to hdiutil..."
         fi
         
