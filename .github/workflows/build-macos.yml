@@ -1,0 +1,130 @@
+name: Build macOS App
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: "15.2"
+    
+    - name: Show Xcode version
+      run: xcodebuild -version
+    
+    - name: Build macOS app
+      run: |
+        set -euo pipefail
+        xcodebuild clean build \
+          -project hello-world.xcodeproj \
+          -scheme hello-world \
+          -configuration Release \
+          -derivedDataPath DerivedData \
+          -destination 'platform=macOS' \
+          CODE_SIGN_IDENTITY="" \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGNING_ALLOWED=NO
+    
+    - name: Locate built app
+      id: locate_app
+      run: |
+        set -euo pipefail
+        APP_PATH="DerivedData/Build/Products/Release/hello-world.app"
+        if [ ! -d "$APP_PATH" ]; then
+          echo "Expected app not found at: $APP_PATH"
+          echo "Searching DerivedData for .app bundles..."
+          APP_PATH="$(find DerivedData -name "hello-world.app" -type d | head -n 1 || true)"
+        fi
+        if [ -z "${APP_PATH:-}" ] || [ ! -d "$APP_PATH" ]; then
+          echo "Failed to locate built app bundle." >&2
+          exit 1
+        fi
+        echo "app_path=$APP_PATH" >> $GITHUB_OUTPUT
+        echo "Found app at: $APP_PATH"
+        ls -la "$APP_PATH"
+
+    - name: Prepare dist folder
+      run: |
+        set -euo pipefail
+        rm -rf dist
+        mkdir -p dist
+        cp -R "${{ steps.locate_app.outputs.app_path }}" "dist/hello-world.app"
+    
+    - name: Create DMG (Optional)
+      run: |
+        set -euo pipefail
+        # 安装 create-dmg 工具
+        brew install create-dmg
+        
+        VOLICON_PATH="dist/hello-world.app/Contents/Resources/AppIcon.icns"
+        VOLICON_ARGS=()
+        if [ -f "$VOLICON_PATH" ]; then
+          VOLICON_ARGS=(--volicon "$VOLICON_PATH")
+        fi
+
+        # 创建 DMG（source folder 必须是包含 .app 的目录）
+        if ! create-dmg \
+          --volname "Hello World" \
+          "${VOLICON_ARGS[@]}" \
+          --window-pos 200 120 \
+          --window-size 800 400 \
+          --icon-size 100 \
+          --icon "hello-world.app" 200 190 \
+          --hide-extension "hello-world.app" \
+          --app-drop-link 600 185 \
+          "hello-world.dmg" \
+          "$GITHUB_WORKSPACE/dist"; then
+          echo "create-dmg failed, falling back to hdiutil..."
+        fi
+        
+        # 如果 create-dmg 失败，使用简单方法
+        if [ ! -f "hello-world.dmg" ]; then
+          echo "Creating simple DMG..."
+          hdiutil create -volname "Hello World" \
+            -srcfolder "dist" \
+            -ov -format UDZO "hello-world.dmg"
+        fi
+    
+    - name: Create ZIP archive
+      run: |
+        set -euo pipefail
+        ditto -c -k --sequesterRsrc --keepParent "dist/hello-world.app" "hello-world.zip"
+        ls -lh "hello-world.zip"
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: hello-world-macos
+        path: |
+          hello-world.zip
+          hello-world.dmg
+        retention-days: 30
+        if-no-files-found: error
+    
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          hello-world.zip
+          hello-world.dmg
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
